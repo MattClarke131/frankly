@@ -347,6 +347,35 @@ Documentation:
 
 This allows you to seed Firestore or other services with test data and reuse it across sessions.
 
+#### Importing data
+
+`emulators.sh` (used by both `npm run dev` and `npm run emulators`) imports data automatically. If the folder `firebase/functions/data` exists at startup, it is passed to the emulators as `--import`. If the folder is missing, the emulators start empty and print `No data folder found ... skipping import.`
+
+To seed your emulators, place an export in `firebase/functions/data` and restart. The folder must contain `firebase-export-metadata.json` at its top level, plus the per-service export folders (`firestore_export`, `auth_export`, `database_export`).
+
+#### Exporting data
+
+Export from a running emulator instance. Run the command from `firebase/functions` and pass the same project ID the emulators use (`FIREBASE_PROJECT_ID` in `client/.env`):
+
+```
+firebase emulators:export ./data --project <FIREBASE_PROJECT_ID>
+```
+
+Without `--project`, the CLI falls back to the default in `.firebaserc` (`dev`). It then cannot find the running emulators, because they register under the project ID from `client/.env`.
+
+Add `--force` to overwrite an existing, non-empty export folder.
+
+A typical workflow:
+
+1. Start the emulators with `npm run dev`.
+2. Create the data you want to keep through the app.
+3. In a second terminal, run the export command above.
+4. Restart `npm run dev`. The exported data loads automatically.
+
+To discard the data and start clean, delete `firebase/functions/data` and restart.
+
+> **Note:** Export folders can contain user and auth data. Check whether `firebase/functions/data` is ignored by git before committing, and keep personal data out of shared exports.
+
 ---
 
 ### Important Notes
