@@ -224,6 +224,8 @@ Steps 1–4 use stamp files in `.local/dev-stamps/` to skip unnecessary work.
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `SKIP_DART_BUILD=1`         | Skip the `build_runner` step in `emulators.sh` (set automatically by `run-dev.sh` since it handles the build itself) |
 | `FRANKLY_DEBUG_FUNCTIONS=1` | Start functions with `--inspect-functions`, allowing you to attach a Node.js debugger for breakpoint debugging       |
+| `FRANKLY_IMPORT_DIR=<path>` | Import emulator data from this folder at startup (see [Emulator Data Import / Export](#emulator-data-import-export)) |
+| `FRANKLY_EXPORT_DIR=<path>` | Save emulator data to this folder when the emulators exit                                                            |
 
 These are set inline before the command, for example:
 
@@ -349,13 +351,40 @@ This allows you to seed Firestore or other services with test data and reuse it 
 
 #### Importing data
 
-`emulators.sh` (used by both `npm run dev` and `npm run emulators`) imports data automatically. If the folder `firebase/functions/data` exists at startup, it is passed to the emulators as `--import`. If the folder is missing, the emulators start empty and print `No data folder found ... skipping import.`
+Both `npm run dev` and `npm run emulators` import data at startup. Set `FRANKLY_IMPORT_DIR` to choose the folder to import:
 
-To seed your emulators, place an export in `firebase/functions/data` and restart. The folder must contain `firebase-export-metadata.json` at its top level, plus the per-service export folders (`firestore_export`, `auth_export`, `database_export`).
+```
+FRANKLY_IMPORT_DIR=./snapshots/demo npm run dev
+```
 
-#### Exporting data
+- The path can be absolute or relative. Relative paths resolve against the directory you ran the command from.
+- If `FRANKLY_IMPORT_DIR` is unset, the emulators import `firebase/functions/data` when it exists. Otherwise they start empty.
+- The folder must be an emulator export. It contains `firebase-export-metadata.json` at its top level, plus the per-service folders (`firestore_export`, `auth_export`, `database_export`).
+- If the variable is set but empty, or points at a missing folder or an invalid export, startup stops with an error.
 
-Export from a running emulator instance. Run the command from `firebase/functions` and pass the same project ID the emulators use (`FIREBASE_PROJECT_ID` in `client/.env`):
+#### Exporting data on exit
+
+Set `FRANKLY_EXPORT_DIR` to save emulator data when the emulators shut down:
+
+```
+FRANKLY_EXPORT_DIR=./snapshots/demo npm run dev
+```
+
+- The path can be absolute or relative, as with `FRANKLY_IMPORT_DIR`.
+- The folder is created if it does not exist. Each exit replaces its previous contents.
+- If the variable is unset, nothing is exported.
+- If the variable is set but empty, or points at a file, startup stops with an error.
+- The export runs on a graceful stop, such as Ctrl+C in the `npm run dev` terminal. It does not run if the emulator processes are killed.
+
+Combine both variables to load one dataset and save to another. Using different folders keeps your original data safe:
+
+```
+FRANKLY_IMPORT_DIR=./snapshots/base FRANKLY_EXPORT_DIR=./snapshots/work npm run dev
+```
+
+#### Exporting data manually
+
+You can also export from a running emulator instance. Run the command from `firebase/functions` and pass the same project ID the emulators use (`FIREBASE_PROJECT_ID` in `client/.env`):
 
 ```
 firebase emulators:export ./data --project <FIREBASE_PROJECT_ID>
@@ -365,16 +394,9 @@ Without `--project`, the CLI falls back to the default in `.firebaserc` (`dev`).
 
 Add `--force` to overwrite an existing, non-empty export folder.
 
-A typical workflow:
+To restart with the exported data, point `FRANKLY_IMPORT_DIR` at it. Exporting into `firebase/functions/data` also works, since that folder is imported by default.
 
-1. Start the emulators with `npm run dev`.
-2. Create the data you want to keep through the app.
-3. In a second terminal, run the export command above.
-4. Restart `npm run dev`. The exported data loads automatically.
-
-To discard the data and start clean, delete `firebase/functions/data` and restart.
-
-> **Note:** Export folders can contain user and auth data. Check whether `firebase/functions/data` is ignored by git before committing, and keep personal data out of shared exports.
+> **Note:** Export folders can contain user and auth data. Keep them out of git, and keep personal data out of shared exports.
 
 ---
 

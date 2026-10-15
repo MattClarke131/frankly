@@ -33,12 +33,19 @@ if [[ -f "$SERVICE_ACCOUNT_KEY" && -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]]; 
 fi
 
 # Start the Firebase emulators with the specified services and project ID. If the inspect flag is set, it will be included in the command.
-# Also check for a data folder and import that data if found
-DATA_DIR="$SCRIPT_DIR/data"
+# Import from FRANKLY_IMPORT_DIR (default: ./data if present) and, if FRANKLY_EXPORT_DIR
+# is set, save emulator data there on exit. See emulators-data-env.sh.
+# shellcheck source=emulators-data-env.sh
+source "$SCRIPT_DIR/emulators-data-env.sh"
+validate_data_env "$SCRIPT_DIR/data" || exit 1
 
-if [[ ! -d "$DATA_DIR" ]]; then
-  echo "No data folder found at $DATA_DIR, skipping import."
-  DATA_DIR=""
+if [[ -z "$IMPORT_DIR" ]]; then
+  echo "No data to import, starting with empty emulators."
+else
+  echo "Importing emulator data from $IMPORT_DIR"
+fi
+if [[ -n "$EXPORT_DIR" ]]; then
+  echo "Emulator data will be exported to $EXPORT_DIR on exit"
 fi
 
 # Start with the FUNCTIONS_EMULATOR environment variable so functions know they are running in the emulator.
@@ -48,4 +55,5 @@ exec firebase emulators:start \
   --only firestore,functions,auth,pubsub,database \
   --project "$PROJECT_ID" \
   ${inspect_flag:+"${inspect_flag[@]}"} \
-  ${DATA_DIR:+"--import=$DATA_DIR"}
+  ${IMPORT_DIR:+"--import=$IMPORT_DIR"} \
+  ${EXPORT_DIR:+"--export-on-exit=$EXPORT_DIR"}

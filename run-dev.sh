@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Remember where the command was run so relative FRANKLY_IMPORT_DIR/FRANKLY_EXPORT_DIR
+# paths resolve against it. npm sets INIT_CWD already; this covers running the script directly.
+export INIT_CWD="${INIT_CWD:-$PWD}"
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR" && pwd)"
 
@@ -153,6 +157,11 @@ trap cleanup EXIT INT TERM
 require_dir "$CLIENT_DIR"
 require_dir "$DATA_MODELS_DIR"
 require_dir "$FUNCTIONS_DIR"
+
+# Fail before the slow build steps if the import/export env vars are invalid.
+# shellcheck source=firebase/functions/emulators-data-env.sh
+source "$FUNCTIONS_DIR/emulators-data-env.sh"
+validate_data_env "$FUNCTIONS_DIR/data" || exit 1
 
 log "Repo root: $REPO_ROOT"
 
