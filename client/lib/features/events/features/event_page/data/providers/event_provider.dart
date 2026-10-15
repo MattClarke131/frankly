@@ -417,14 +417,16 @@ class EventProvider with ChangeNotifier {
       row.add(
         EnumToString.convertToString(registrationData[i].membership?.status),
       );
-      final createdDate =
-          registrationData[i].memberEvent?.participant?.createdDate;
+      // Read both times from the client's Firestore data. The cloud function
+      // copy in memberEvent serializes createdDate without a UTC marker, so the
+      // client parses it as local time and shows it shifted by the UTC offset.
+      final participant = participantData
+          .firstWhereOrNull((p) => p.id == registrationData[i].id);
+      final createdDate = participant?.createdDate;
       row.add(
         createdDate != null ? dateTimeFormat(date: createdDate.toLocal()) : '',
       );
-      final mostRecentPresentTime = participantData
-          .firstWhereOrNull((p) => p.id == registrationData[i].id)
-          ?.mostRecentPresentTime;
+      final mostRecentPresentTime = participant?.mostRecentPresentTime;
       row.add(
         mostRecentPresentTime != null
             ? dateTimeFormat(date: mostRecentPresentTime.toLocal())
