@@ -9,6 +9,8 @@ import 'package:data_models/events/event.dart';
 
 /// Maintains Event.registrationCount by counting active participants whenever
 /// any event-participants document is written (created, updated, or deleted).
+/// Also records Participant.firstPresentTime the first time a participant is
+/// marked present.
 class OnEventParticipant extends OnFirestoreFunction<Participant> {
   static const String _functionName = 'EventParticipantOnWrite';
 
@@ -47,6 +49,15 @@ class OnEventParticipant extends OnFirestoreFunction<Participant> {
     DateTime updateTime,
     EventContext context,
   ) async {
+    if (changes.after.exists &&
+        after.isPresent &&
+        after.firstPresentTime == null) {
+      await recordFirstPresence(
+        participantRef: changes.after.reference,
+        fallbackTime: updateTime,
+      );
+    }
+
     // Skip writes that don't affect active status (presence, breakout room,
     // timestamp updates, etc.) to avoid rescanning all participants on every
     // live-meeting heartbeat.
@@ -76,6 +87,42 @@ class OnEventParticipant extends OnFirestoreFunction<Participant> {
     } catch (e, s) {
       print('Error in $_functionName: $e\n$s');
       rethrow;
+    }
+  }
+
+  /// Sets firstPresentTime to the participant's mostRecentPresentTime if it is
+  /// not yet set. Runs in a transaction because the client writes presence
+  /// several times in quick succession on join, and only the earliest should
+  /// stick.
+  Future<void> recordFirstPresence({
+    required DocumentReference participantRef,
+    required DateTime fallbackTime,
+  }) async {
+    try {
+      await firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(participantRef);
+        if (!snapshot.exists) return;
+
+        final participant = Participant.fromJson(
+          firestoreUtils.fromFirestoreJson(snapshot.data.toMap()),
+        );
+        if (!participant.isPresent || participant.firstPresentTime != null) {
+          return;
+        }
+
+        final firstPresentTime =
+            participant.mostRecentPresentTime ?? fallbackTime;
+        transaction.update(
+          participantRef,
+          UpdateData.fromMap({
+            Participant.kFieldFirstPresentTime:
+                Timestamp.fromDateTime(firstPresentTime),
+          }),
+        );
+      });
+    } catch (e, s) {
+      // Don't block the registration count update below.
+      print('Error recording first presence in $_functionName: $e\n$s');
     }
   }
 
