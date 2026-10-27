@@ -395,6 +395,7 @@ class EventProvider with ChangeNotifier {
     firstRow.add('Email');
     firstRow.add('Member Status');
     firstRow.add('RSVP Time');
+    firstRow.add('Join Time');
     firstRow.add('Last Active Time');
     firstRow.add('Room Assigned');
     rows.add(firstRow);
@@ -422,9 +423,15 @@ class EventProvider with ChangeNotifier {
       row.add(
         createdDate != null ? dateTimeFormat(date: createdDate.toLocal()) : '',
       );
-      final mostRecentPresentTime = participantData
-          .firstWhereOrNull((p) => p.id == registrationData[i].id)
-          ?.mostRecentPresentTime;
+      final participant = participantData
+          .firstWhereOrNull((p) => p.id == registrationData[i].id);
+      final firstPresentTime = participant?.firstPresentTime;
+      row.add(
+        firstPresentTime != null
+            ? dateTimeFormat(date: firstPresentTime.toLocal())
+            : '',
+      );
+      final mostRecentPresentTime = participant?.mostRecentPresentTime;
       row.add(
         mostRecentPresentTime != null
             ? dateTimeFormat(date: mostRecentPresentTime.toLocal())
