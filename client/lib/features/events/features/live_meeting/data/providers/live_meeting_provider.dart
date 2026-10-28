@@ -153,8 +153,16 @@ class LiveMeetingProvider with ChangeNotifier {
   bool get clickedEnterMeeting => _clickedEnterMeeting;
 
   set clickedEnterMeeting(bool value) {
+    final wasInPrescreen =
+        activeUiState == MeetingUiState.enterMeetingPrescreen;
     _clickedEnterMeeting = true;
     notifyListeners();
+
+    // Presence is skipped on the prescreen, so record it as soon as the user
+    // enters rather than waiting for the next heartbeat.
+    if (wasInPrescreen) {
+      unawaited(forcePresenceHeartbeat());
+    }
   }
 
   late final Future<bool> canAutoplayLookupFuture;
@@ -432,10 +440,14 @@ class LiveMeetingProvider with ChangeNotifier {
       _checkShowBreakoutDialog();
     });
 
-    firestoreLiveMeetingService.updateMeetingPresence(
-      event: eventProvider.event,
-      isPresent: true,
-    );
+    // Users on the instant meeting prescreen have not joined yet. Presence is
+    // written when they click past it (see clickedEnterMeeting).
+    if (activeUiState != MeetingUiState.enterMeetingPrescreen) {
+      firestoreLiveMeetingService.updateMeetingPresence(
+        event: eventProvider.event,
+        isPresent: true,
+      );
+    }
 
     _onUnloadSubscription = html.window.onBeforeUnload.listen((event) {
       firestoreLiveMeetingService.updateMeetingPresence(
