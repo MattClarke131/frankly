@@ -168,11 +168,62 @@ service cloud.firestore {
 
             // Discussion Threads
             match /discussion-threads/{discussionThreadId} {
-                allow read, write: if hasAuth();
+                function keepsCreator() {
+                    return request.resource.data.get('creatorId', null) == resource.data.get('creatorId', null);
+                }
+
+                // True if the list field only gained or lost the caller's uid.
+                function onlyChangesOwnId(field) {
+                    let before = resource.data.get(field, []).toSet();
+                    let after = request.resource.data.get(field, []).toSet();
+                    return after.difference(before).hasOnly([request.auth.uid])
+                           && before.difference(after).hasOnly([request.auth.uid]);
+                }
+
+                // True if `emotions` only gained or lost entries created by the caller.
+                function onlyChangesOwnEmotions() {
+                    let uid = request.auth.uid;
+                    let mine = [
+                        {'creatorId': uid, 'emotionType': 'thumbsUp'},
+                        {'creatorId': uid, 'emotionType': 'heart'},
+                        {'creatorId': uid, 'emotionType': 'hundred'},
+                        {'creatorId': uid, 'emotionType': 'exclamation'},
+                        {'creatorId': uid, 'emotionType': 'plusOne'},
+                        {'creatorId': uid, 'emotionType': 'laughWithTears'},
+                        {'creatorId': uid, 'emotionType': 'heartEyes'}
+                    ];
+                    let before = resource.data.get('emotions', []).toSet();
+                    let after = request.resource.data.get('emotions', []).toSet();
+                    return after.difference(before).hasOnly(mine)
+                           && before.difference(after).hasOnly(mine);
+                }
+
+                // Lets any signed-in user react, touching only their own reactions.
+                function isOwnReactionUpdate(reactionFields) {
+                    return hasAuth()
+                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(reactionFields)
+                           && onlyChangesOwnId('likedByIds')
+                           && onlyChangesOwnId('dislikedByIds')
+                           && onlyChangesOwnEmotions();
+                }
+
+                allow read: if hasAuth();
+                allow create: if isDocCreator(request.resource);
+                allow update: if keepsCreator()
+                                 && (isDocCreator(resource)
+                                     || isCommunityMod()
+                                     || isOwnReactionUpdate(['likedByIds', 'dislikedByIds', 'emotions']));
+                allow delete: if isDocCreator(resource) || isCommunityMod();
 
                 // Discussion Thread Comments
                 match /discussion-thread-comments/{discussionThreadCommentId} {
-                    allow read, write: if hasAuth();
+                    allow read: if hasAuth();
+                    allow create: if isDocCreator(request.resource);
+                    allow update: if keepsCreator()
+                                     && (isDocCreator(resource)
+                                         || isCommunityMod()
+                                         || isOwnReactionUpdate(['emotions']));
+                    allow delete: if isDocCreator(resource) || isCommunityMod();
                 }
             }
 

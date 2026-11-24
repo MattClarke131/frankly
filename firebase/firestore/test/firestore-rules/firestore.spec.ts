@@ -727,6 +727,208 @@ describe("Firestore security rules", async () => {
       });
     });
 
+    describe("/discussion-threads/{discussionThreadId}", () => {
+      const FieldValue = firebase.firestore.FieldValue;
+      const threadHelper = new CommunityRulesHelper(dbAdmin, [
+        { collection: collectionCommunity, document: "communityId" },
+        { collection: "discussion-threads", document: "threadId" },
+      ]);
+      const commentHelper = new CommunityRulesHelper(dbAdmin, [
+        { collection: collectionCommunity, document: "communityId" },
+        { collection: "discussion-threads", document: "threadId" },
+        { collection: "discussion-thread-comments", document: "commentId" },
+      ]);
+      const thread = {
+        id: "threadId",
+        creatorId: "author",
+        content: "original",
+        likedByIds: ["victim"],
+        dislikedByIds: [],
+        emotions: [{ creatorId: "victim", emotionType: "heart" }],
+        isDeleted: false,
+      };
+      const comment = {
+        id: "commentId",
+        creatorId: "author",
+        comment: "original",
+        emotions: [{ creatorId: "victim", emotionType: "heart" }],
+        isDeleted: false,
+      };
+
+      function threadRef(userId?: string) {
+        return threadHelper.getDocumentRef(getAuthedFirestore(userId));
+      }
+      function commentRef(userId?: string) {
+        return commentHelper.getDocumentRef(getAuthedFirestore(userId));
+      }
+
+      beforeEach(async () => {
+        await threadHelper.getDocumentRef(dbAdmin).set(thread);
+        await commentHelper.getDocumentRef(dbAdmin).set(comment);
+      });
+
+      describe("threads", () => {
+        it("signed-in user creates a thread as themselves", async () => {
+          const col = threadHelper.getCollectionRef(getAuthedFirestore("bob"));
+          await firebase.assertSucceeds(
+            col.doc("new").set({ ...thread, id: "new", creatorId: "bob" })
+          );
+          await firebase.assertFails(
+            col.doc("new2").set({ ...thread, id: "new2", creatorId: "author" })
+          );
+        });
+        it("signed-out user can't read or create", async () => {
+          const col = threadHelper.getCollectionRef(getAuthedFirestore());
+          await firebase.assertFails(threadRef().get());
+          await firebase.assertFails(col.doc("new").set(thread));
+        });
+        it("author edits and soft-deletes", async () => {
+          await firebase.assertSucceeds(
+            threadRef("author").update({ ...thread, content: "edited" })
+          );
+          await firebase.assertSucceeds(
+            threadRef("author").update({ isDeleted: true })
+          );
+          await firebase.assertSucceeds(threadRef("author").delete());
+        });
+        it("author can't change creatorId", async () => {
+          await firebase.assertFails(
+            threadRef("author").update({ creatorId: "bob" })
+          );
+        });
+        it("non-author can't edit or delete", async () => {
+          await firebase.assertFails(
+            threadRef("bob").update({ content: "hacked" })
+          );
+          await firebase.assertFails(
+            threadRef("bob").update({ isDeleted: true })
+          );
+          await firebase.assertFails(threadRef("bob").delete());
+        });
+        it("mod soft-deletes and deletes", async () => {
+          await threadHelper.createMembership("mod1", "mod");
+          await firebase.assertSucceeds(
+            threadRef("mod1").update({ isDeleted: true })
+          );
+          await firebase.assertSucceeds(threadRef("mod1").delete());
+        });
+        it("non-author likes and dislikes", async () => {
+          await firebase.assertSucceeds(
+            threadRef("bob").update({
+              likedByIds: FieldValue.arrayUnion("bob"),
+              dislikedByIds: FieldValue.arrayRemove("bob"),
+            })
+          );
+          await firebase.assertSucceeds(
+            threadRef("bob").update({
+              likedByIds: FieldValue.arrayRemove("bob"),
+              dislikedByIds: FieldValue.arrayUnion("bob"),
+            })
+          );
+        });
+        it("non-author can't change other users' likes", async () => {
+          await firebase.assertFails(
+            threadRef("bob").update({
+              likedByIds: FieldValue.arrayUnion("carol"),
+            })
+          );
+          await firebase.assertFails(
+            threadRef("bob").update({
+              likedByIds: FieldValue.arrayRemove("victim"),
+            })
+          );
+        });
+        it("non-author can't mix a like with an edit", async () => {
+          await firebase.assertFails(
+            threadRef("bob").update({
+              likedByIds: FieldValue.arrayUnion("bob"),
+              content: "hacked",
+            })
+          );
+        });
+        it("non-author adds and swaps own emotion", async () => {
+          const thumbs = { creatorId: "bob", emotionType: "thumbsUp" };
+          const heart = { creatorId: "bob", emotionType: "heart" };
+          await firebase.assertSucceeds(
+            threadRef("bob").update({ emotions: FieldValue.arrayUnion(thumbs) })
+          );
+          const db = getAuthedFirestore("bob");
+          const ref = threadHelper.getDocumentRef(db);
+          const batch = db.batch();
+          batch.update(ref, { emotions: FieldValue.arrayUnion(heart) });
+          batch.update(ref, { emotions: FieldValue.arrayRemove(thumbs) });
+          await firebase.assertSucceeds(batch.commit());
+        });
+        it("non-author can't change other users' emotions", async () => {
+          await firebase.assertFails(
+            threadRef("bob").update({
+              emotions: FieldValue.arrayUnion({
+                creatorId: "carol",
+                emotionType: "heart",
+              }),
+            })
+          );
+          await firebase.assertFails(
+            threadRef("bob").update({
+              emotions: FieldValue.arrayRemove(thread.emotions[0]),
+            })
+          );
+        });
+      });
+
+      describe("comments", () => {
+        it("signed-in user comments as themselves", async () => {
+          const col = commentHelper.getCollectionRef(getAuthedFirestore("bob"));
+          await firebase.assertSucceeds(
+            col.doc("new").set({ ...comment, id: "new", creatorId: "bob" })
+          );
+          await firebase.assertFails(
+            col.doc("new2").set({ ...comment, id: "new2", creatorId: "author" })
+          );
+        });
+        it("author soft-deletes", async () => {
+          await firebase.assertSucceeds(
+            commentRef("author").update({ isDeleted: true })
+          );
+        });
+        it("non-author can't edit or delete", async () => {
+          await firebase.assertFails(
+            commentRef("bob").update({ comment: "hacked" })
+          );
+          await firebase.assertFails(
+            commentRef("bob").update({ isDeleted: true })
+          );
+          await firebase.assertFails(commentRef("bob").delete());
+        });
+        it("mod soft-deletes", async () => {
+          await commentHelper.createMembership("mod1", "mod");
+          await firebase.assertSucceeds(
+            commentRef("mod1").update({ isDeleted: true })
+          );
+        });
+        it("non-author reacts with own emotion only", async () => {
+          await firebase.assertSucceeds(
+            commentRef("bob").update({
+              emotions: FieldValue.arrayUnion({
+                creatorId: "bob",
+                emotionType: "hundred",
+              }),
+            })
+          );
+          await firebase.assertFails(
+            commentRef("bob").update({
+              emotions: FieldValue.arrayRemove(comment.emotions[0]),
+            })
+          );
+          await firebase.assertFails(
+            commentRef("bob").update({
+              likedByIds: FieldValue.arrayUnion("bob"),
+            })
+          );
+        });
+      });
+    });
+
     describe("/templates/{templateId}", () => {
       const collectionTemplates = "templates";
       const communityRulesHelper = new CommunityRulesHelper(dbAdmin, [

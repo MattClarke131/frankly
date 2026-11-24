@@ -644,6 +644,153 @@ describe("Firestore security rules", () => __awaiter(void 0, void 0, void 0, fun
                 }
             }));
         });
+        describe("/discussion-threads/{discussionThreadId}", () => {
+            const FieldValue = firebase.firestore.FieldValue;
+            const threadHelper = new firestore_rules_helper_1.CommunityRulesHelper(dbAdmin, [
+                { collection: collectionCommunity, document: "communityId" },
+                { collection: "discussion-threads", document: "threadId" },
+            ]);
+            const commentHelper = new firestore_rules_helper_1.CommunityRulesHelper(dbAdmin, [
+                { collection: collectionCommunity, document: "communityId" },
+                { collection: "discussion-threads", document: "threadId" },
+                { collection: "discussion-thread-comments", document: "commentId" },
+            ]);
+            const thread = {
+                id: "threadId",
+                creatorId: "author",
+                content: "original",
+                likedByIds: ["victim"],
+                dislikedByIds: [],
+                emotions: [{ creatorId: "victim", emotionType: "heart" }],
+                isDeleted: false,
+            };
+            const comment = {
+                id: "commentId",
+                creatorId: "author",
+                comment: "original",
+                emotions: [{ creatorId: "victim", emotionType: "heart" }],
+                isDeleted: false,
+            };
+            function threadRef(userId) {
+                return threadHelper.getDocumentRef(getAuthedFirestore(userId));
+            }
+            function commentRef(userId) {
+                return commentHelper.getDocumentRef(getAuthedFirestore(userId));
+            }
+            beforeEach(() => __awaiter(void 0, void 0, void 0, function* () {
+                yield threadHelper.getDocumentRef(dbAdmin).set(thread);
+                yield commentHelper.getDocumentRef(dbAdmin).set(comment);
+            }));
+            describe("threads", () => {
+                it("signed-in user creates a thread as themselves", () => __awaiter(void 0, void 0, void 0, function* () {
+                    const col = threadHelper.getCollectionRef(getAuthedFirestore("bob"));
+                    yield firebase.assertSucceeds(col.doc("new").set(Object.assign(Object.assign({}, thread), { id: "new", creatorId: "bob" })));
+                    yield firebase.assertFails(col.doc("new2").set(Object.assign(Object.assign({}, thread), { id: "new2", creatorId: "author" })));
+                }));
+                it("signed-out user can't read or create", () => __awaiter(void 0, void 0, void 0, function* () {
+                    const col = threadHelper.getCollectionRef(getAuthedFirestore());
+                    yield firebase.assertFails(threadRef().get());
+                    yield firebase.assertFails(col.doc("new").set(thread));
+                }));
+                it("author edits and soft-deletes", () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield firebase.assertSucceeds(threadRef("author").update(Object.assign(Object.assign({}, thread), { content: "edited" })));
+                    yield firebase.assertSucceeds(threadRef("author").update({ isDeleted: true }));
+                    yield firebase.assertSucceeds(threadRef("author").delete());
+                }));
+                it("author can't change creatorId", () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield firebase.assertFails(threadRef("author").update({ creatorId: "bob" }));
+                }));
+                it("non-author can't edit or delete", () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield firebase.assertFails(threadRef("bob").update({ content: "hacked" }));
+                    yield firebase.assertFails(threadRef("bob").update({ isDeleted: true }));
+                    yield firebase.assertFails(threadRef("bob").delete());
+                }));
+                it("mod soft-deletes and deletes", () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield threadHelper.createMembership("mod1", "mod");
+                    yield firebase.assertSucceeds(threadRef("mod1").update({ isDeleted: true }));
+                    yield firebase.assertSucceeds(threadRef("mod1").delete());
+                }));
+                it("non-author likes and dislikes", () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield firebase.assertSucceeds(threadRef("bob").update({
+                        likedByIds: FieldValue.arrayUnion("bob"),
+                        dislikedByIds: FieldValue.arrayRemove("bob"),
+                    }));
+                    yield firebase.assertSucceeds(threadRef("bob").update({
+                        likedByIds: FieldValue.arrayRemove("bob"),
+                        dislikedByIds: FieldValue.arrayUnion("bob"),
+                    }));
+                }));
+                it("non-author can't change other users' likes", () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield firebase.assertFails(threadRef("bob").update({
+                        likedByIds: FieldValue.arrayUnion("carol"),
+                    }));
+                    yield firebase.assertFails(threadRef("bob").update({
+                        likedByIds: FieldValue.arrayRemove("victim"),
+                    }));
+                }));
+                it("non-author can't mix a like with an edit", () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield firebase.assertFails(threadRef("bob").update({
+                        likedByIds: FieldValue.arrayUnion("bob"),
+                        content: "hacked",
+                    }));
+                }));
+                it("non-author adds and swaps own emotion", () => __awaiter(void 0, void 0, void 0, function* () {
+                    const thumbs = { creatorId: "bob", emotionType: "thumbsUp" };
+                    const heart = { creatorId: "bob", emotionType: "heart" };
+                    yield firebase.assertSucceeds(threadRef("bob").update({ emotions: FieldValue.arrayUnion(thumbs) }));
+                    const db = getAuthedFirestore("bob");
+                    const ref = threadHelper.getDocumentRef(db);
+                    const batch = db.batch();
+                    batch.update(ref, { emotions: FieldValue.arrayUnion(heart) });
+                    batch.update(ref, { emotions: FieldValue.arrayRemove(thumbs) });
+                    yield firebase.assertSucceeds(batch.commit());
+                }));
+                it("non-author can't change other users' emotions", () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield firebase.assertFails(threadRef("bob").update({
+                        emotions: FieldValue.arrayUnion({
+                            creatorId: "carol",
+                            emotionType: "heart",
+                        }),
+                    }));
+                    yield firebase.assertFails(threadRef("bob").update({
+                        emotions: FieldValue.arrayRemove(thread.emotions[0]),
+                    }));
+                }));
+            });
+            describe("comments", () => {
+                it("signed-in user comments as themselves", () => __awaiter(void 0, void 0, void 0, function* () {
+                    const col = commentHelper.getCollectionRef(getAuthedFirestore("bob"));
+                    yield firebase.assertSucceeds(col.doc("new").set(Object.assign(Object.assign({}, comment), { id: "new", creatorId: "bob" })));
+                    yield firebase.assertFails(col.doc("new2").set(Object.assign(Object.assign({}, comment), { id: "new2", creatorId: "author" })));
+                }));
+                it("author soft-deletes", () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield firebase.assertSucceeds(commentRef("author").update({ isDeleted: true }));
+                }));
+                it("non-author can't edit or delete", () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield firebase.assertFails(commentRef("bob").update({ comment: "hacked" }));
+                    yield firebase.assertFails(commentRef("bob").update({ isDeleted: true }));
+                    yield firebase.assertFails(commentRef("bob").delete());
+                }));
+                it("mod soft-deletes", () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield commentHelper.createMembership("mod1", "mod");
+                    yield firebase.assertSucceeds(commentRef("mod1").update({ isDeleted: true }));
+                }));
+                it("non-author reacts with own emotion only", () => __awaiter(void 0, void 0, void 0, function* () {
+                    yield firebase.assertSucceeds(commentRef("bob").update({
+                        emotions: FieldValue.arrayUnion({
+                            creatorId: "bob",
+                            emotionType: "hundred",
+                        }),
+                    }));
+                    yield firebase.assertFails(commentRef("bob").update({
+                        emotions: FieldValue.arrayRemove(comment.emotions[0]),
+                    }));
+                    yield firebase.assertFails(commentRef("bob").update({
+                        likedByIds: FieldValue.arrayUnion("bob"),
+                    }));
+                }));
+            });
+        });
         describe("/templates/{templateId}", () => {
             const collectionTemplates = "templates";
             const communityRulesHelper = new firestore_rules_helper_1.CommunityRulesHelper(dbAdmin, [
